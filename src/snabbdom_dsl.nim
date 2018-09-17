@@ -1,21 +1,47 @@
-import snabbdom
+#import snabbdom except Node
 import macros
+import options
+
+#type
+#  VNodes* = seq[VNode]
+
 
 type
-  VNodes* = seq[VNode]
+  Node* = ref object
+    tag: cstring
+    children: Nodes
+    text: cstring
+
+  Nodes* = seq[Node]
+
+proc newNode*(tag: cstring): Node =
+  Node(tag: tag, children: newSeq[Node](), text: cstring"")
+
+
+proc newNode*(tag: cstring, children: Nodes): Node =
+  Node(tag: tag, children: children, text: cstring"")
+
 
 
 proc buildNodesBlock(body: NimNode, level: int): NimNode
 
 
+
 proc buildNodes(body: NimNode, level: int): NimNode =
 
-  template appendElement(tmp, tag, attrs, childrenBlock) {.dirty.} =
+  template appendElement(tmp, tag, childrenBlock) {.dirty.} =
     bind newNode
-    let tmp = newNode(tag)
+    let tmp = newNode(tag.cstring)
     nodes.add(tmp)
-    tmp.attributes = attrs
-    tmp.children = childrenBlock
+    (tmp.children, tmp.text) = childrenBlock
+
+  template appendElementNoChildren(tmp, tag) {.dirty.} =
+    bind newNode
+    let tmp = newNode(tag.cstring)
+    nodes.add(tmp)
+
+  template appendText(textNode) {.dirty.} =
+    text = textNode
 
   template embedSeq(nodesSeqExpr) {.dirty.} =
     for node in nodesSeqExpr:
@@ -37,12 +63,8 @@ proc buildNodes(body: NimNode, level: int): NimNode =
       result = getAst(embedSeq(nodesSeqExpr))
     elif tagStr == "call":
       result = n[1]
-    elif tagStr == "t":
-      let tmp = genSym(nskLet, "tmp")
-      let tag = newStrLitNode("#text")
-      let childrenBlock = newEmptyNode()
-      let attributes = dummyTextAttributes(n[1])
-      result = getAst(appendElement(tmp, tag, attributes, childrenBlock))
+    elif tagStr == "text":
+      result = getAst(appendText(n[1]))
     else:
       # if the last element is an nnkStmtList (block argument)
       # => full recursion to build block statement for children
@@ -51,18 +73,17 @@ proc buildNodes(body: NimNode, level: int): NimNode =
           buildNodesBlock(n[^1], level+1)
         else:
           newNimNode(nnkEmpty)
-      let attributes = extractAttributes(n)
+      #let attributes = extractAttributes(n)
       # echo attributes.repr
       # TODO: handle nil cases explicitly by constructing empty seqs to avoid nil issues
-      result = getAst(appendElement(tmp, tag, attributes, childrenBlock))
+      result = getAst(appendElement(tmp, tag, childrenBlock))
   of nnkIdent:
     # Currently a single ident is treated as an empty tag. Not sure if
     # there more important use cases. Maybe `embed` them?
     let tmp = genSym(nskLet, "tmp")
     let tag = newStrLitNode($n)
-    let childrenBlock = newEmptyNode()
-    let attributes = newEmptyNode()
-    result = getAst(appendElement(tmp, tag, attributes, childrenBlock))
+    #let attributes = newEmptyNode()
+    result = getAst(appendElementNoChildren(tmp, tag))
 
   of nnkForStmt, nnkIfExpr, nnkElifExpr, nnkElseExpr,
       nnkOfBranch, nnkElifBranch, nnkExceptBranch, nnkElse,
@@ -103,17 +124,19 @@ proc buildNodesBlock(body: NimNode, level: int): NimNode =
   ## in a block which provides and returns the `nodes` variable.
   template resultTemplate(elementBuilder) {.dirty.} =
     block:
-      var nodes = newSeq[Node]()
+      var nodes = newSeq[snabbdom_dsl.Node]()
+      var text = cstring""
       elementBuilder
-      nodes
+      (nodes, text)
 
   let elements = buildNodes(body, level)
   result = getAst(resultTemplate(elements))
   if level == 0:
     echo result.repr
+    echo "End of buildNodesBlock"
 
 
-macro buildSvg*(body: untyped): VNodes =
+macro buildHtml*(body: untyped): Nodes =
   echo " --------- body ----------- "
   echo body.treeRepr
   echo " --------- body ----------- "
@@ -121,3 +144,4 @@ macro buildSvg*(body: untyped): VNodes =
   let kids = newProc(procType=nnkDo, body=body)
   expectKind kids, nnkDo
   result = buildNodesBlock(body(kids), 0)
+  echo "End of buildHtml"
