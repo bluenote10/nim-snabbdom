@@ -1,4 +1,6 @@
 import kdom
+import jsffi
+import jseq
 import sugar
 
 {.emit: """
@@ -82,8 +84,11 @@ proc init*(modules: seq[Module]): Patch {.importcpp: "snabbdom.init(#)".}
 
 type
   VNode* = ref object
+  VNodes* = jseq[JsObject] # seq[JsObject]
 
+proc h*(name: cstring): VNode {.importcpp: "h.default(#)".}
 proc h*(name: cstring, content: cstring): VNode {.importcpp: "h.default(#, #)".}
+proc h*(name: cstring, children: VNodes): VNode {.importcpp: "h.default(#, #)".}
 
 proc patch*(p: Patch, element: Element, newNode: VNode) {.importcpp: "#(#, #)".}
 proc patch*(p: Patch, oldNode: VNode, newNode: VNode) {.importcpp: "#(#, #)".}
@@ -100,7 +105,15 @@ proc mainLoop*(rootElementName: cstring, render: RedrawFunc -> VNode) =
   var oldNode: VNode = nil
 
   proc redraw() =
+    {.emit: """
+      var performance = window.performance;
+      var t0 = performance.now();
+    """.}
     let newNode = render(redraw)
+    {.emit: """
+      var t1 = performance.now();
+      console.log("Rendering call took " + (t1 - t0) + " milliseconds.")
+    """.}
 
     if oldNode.isNil:
       let rootElement = document.getElementById(rootElementName)
